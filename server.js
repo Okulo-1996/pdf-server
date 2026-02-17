@@ -62,7 +62,7 @@ app.post("/generate-pdf", (req, res) => {
       .fillColor("#1e293b")
       .font("Helvetica")
       .text("Contact: 0775 109 046 | 0750 263 691", { align: "center" })
-      .text("Email: info@illending.com", { align: "center" });
+      .text("Email: okuloisaac46@gmail.com", { align: "center" });
 
     doc.moveDown();
 
