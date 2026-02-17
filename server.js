@@ -1,4 +1,3 @@
-// backend/server.js (on Render.com)
 const express = require('express');
 const PDFDocument = require('pdfkit');
 const cors = require('cors');
@@ -9,16 +8,67 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve static files (like stamp.png)
+// Serve static files
 app.use('/static', express.static(path.join(__dirname, 'public')));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+    const stampPath = path.join(__dirname, 'public', 'stamp.png');
+    const stampAvailable = fs.existsSync(stampPath);
+    
+    console.log('📋 Health check:', {
+        stampAvailable,
+        stampPath,
+        files: fs.readdirSync(__dirname),
+        publicFiles: fs.existsSync(path.join(__dirname, 'public')) ? 
+                    fs.readdirSync(path.join(__dirname, 'public')) : []
+    });
+    
     res.json({ 
         status: 'online', 
         message: 'I&L PDF Server is running',
-        stampAvailable: fs.existsSync(path.join(__dirname, 'public', 'stamp.png'))
+        stampAvailable: stampAvailable,
+        serverTime: new Date().toISOString()
     });
+});
+
+// Debug endpoint to test stamp
+app.get('/debug/stamp', (req, res) => {
+    const stampPath = path.join(__dirname, 'public', 'stamp.png');
+    
+    try {
+        const exists = fs.existsSync(stampPath);
+        
+        if (!exists) {
+            return res.json({
+                error: 'Stamp not found',
+                path: stampPath,
+                rootFiles: fs.readdirSync(__dirname),
+                publicFiles: fs.existsSync(path.join(__dirname, 'public')) ? 
+                            fs.readdirSync(path.join(__dirname, 'public')) : []
+            });
+        }
+        
+        const stats = fs.statSync(stampPath);
+        const imageBuffer = fs.readFileSync(stampPath);
+        const base64Image = imageBuffer.toString('base64').substring(0, 50) + '...';
+        
+        res.json({
+            success: true,
+            message: 'Stamp found',
+            path: stampPath,
+            size: stats.size,
+            exists: true,
+            isFile: stats.isFile(),
+            preview: base64Image
+        });
+        
+    } catch (error) {
+        res.json({
+            error: error.message,
+            path: stampPath
+        });
+    }
 });
 
 // Generate PDF endpoint
@@ -30,7 +80,8 @@ app.post('/generate-pdf', (req, res) => {
         const doc = new PDFDocument({ 
             margin: 50, 
             size: 'A4',
-            bufferPages: true
+            bufferPages: true,
+            autoFirstPage: true
         });
         
         // Set response headers
@@ -95,7 +146,6 @@ app.post('/generate-pdf', (req, res) => {
         doc.y = startY + 70;
         
         // ========== LOAN SUMMARY ==========
-        // Calculate totals
         let totalBorrowed = 0;
         let totalPaid = 0;
         let totalDue = 0;
@@ -104,7 +154,7 @@ app.post('/generate-pdf', (req, res) => {
         loans.forEach(loan => {
             totalBorrowed += loan.amount;
             totalInterest += loan.totalInterest || 0;
-            totalPaid += (loan.totalRepayment - loan.balance);
+            totalPaid += ((loan.totalRepayment || loan.amount + (loan.amount * 0.2 * loan.term)) - loan.balance);
             totalDue += loan.balance;
         });
         
@@ -116,7 +166,6 @@ app.post('/generate-pdf', (req, res) => {
         
         doc.moveDown(0.5);
         
-        // Create summary table
         const summaryY = doc.y;
         const summaryData = [
             ['Total Loans:', loans.length.toString()],
@@ -151,7 +200,6 @@ app.post('/generate-pdf', (req, res) => {
             
             doc.moveDown(0.5);
             
-            // Table headers
             const tableTop = doc.y;
             const headers = ['Loan ID', 'Amount', 'Term', 'Monthly', 'Balance', 'Status'];
             const colWidths = [80, 90, 60, 90, 90, 80];
@@ -172,7 +220,6 @@ app.post('/generate-pdf', (req, res) => {
             // Draw rows
             let yPos = tableTop + 20;
             loans.forEach((loan, index) => {
-                // Alternate row background
                 if (index % 2 === 0) {
                     doc.rect(50, yPos - 5, 500, 20).fill('#f8fafc');
                 }
@@ -211,7 +258,6 @@ app.post('/generate-pdf', (req, res) => {
             
             doc.moveDown(0.5);
             
-            // Payment table headers
             const tableTop = doc.y;
             const payHeaders = ['Date', 'Amount', 'Method', 'Reference'];
             const payColWidths = [120, 120, 120, 140];
@@ -232,7 +278,6 @@ app.post('/generate-pdf', (req, res) => {
             // Draw payment rows
             yPos = tableTop + 20;
             payments.forEach((payment, index) => {
-                // Alternate row background
                 if (index % 2 === 0) {
                     doc.rect(50, yPos - 5, 500, 20).fill('#f8fafc');
                 }
@@ -260,67 +305,87 @@ app.post('/generate-pdf', (req, res) => {
         }
         
         // ========== COMPANY STAMP AND SIGNATURE ==========
-        doc.moveDown(2);
+        // Add some space
+        doc.moveDown(3);
         
-        // Create a stamp box at the bottom
-        const stampY = doc.y;
+        // Save current Y position
+        const stampAreaY = doc.y;
         
-        // Draw a border for the stamp area
-        doc.rect(400, stampY, 200, 100).stroke('#2563eb');
+        // Draw signature line on left
+        doc.moveTo(50, stampAreaY + 40)
+           .lineTo(200, stampAreaY + 40)
+           .stroke();
         
-        // Add stamp text
-        doc.fontSize(12)
-           .fillColor('#2563eb')
-           .font('Helvetica-Bold')
-           .text('OFFICIAL STAMP', 410, stampY + 10);
+        doc.fontSize(10)
+           .fillColor('#1e293b')
+           .text('Authorized Signature', 50, stampAreaY + 45)
+           .text('Managing Director', 50, stampAreaY + 55);
         
-        // ===== INSERT ACTUAL STAMP IMAGE =====
+        // Add date stamp
+        doc.fontSize(9)
+           .fillColor('#64748b')
+           .text(`Digitally Generated: ${new Date().toLocaleString()}`, 50, stampAreaY + 70);
+        
+        // ========== STAMP IMAGE ON RIGHT SIDE ==========
         const stampPath = path.join(__dirname, 'public', 'stamp.png');
         
-        // Check if stamp file exists
+        // Check if stamp exists
         if (fs.existsSync(stampPath)) {
             try {
-                // Add the actual stamp image
-                doc.image(stampPath, 430, stampY + 30, {
+                console.log('✅ Found stamp at:', stampPath);
+                
+                // Get image dimensions
+                const stampImage = doc.openImage(stampPath);
+                console.log('📏 Stamp dimensions:', stampImage.width, 'x', stampImage.height);
+                
+                // Draw stamp box background
+                doc.rect(400, stampAreaY, 150, 120)
+                   .fillOpacity(0.05)
+                   .fill('#2563eb')
+                   .fillOpacity(1)
+                   .stroke('#2563eb');
+                
+                // Add "OFFICIAL STAMP" text
+                doc.fontSize(10)
+                   .fillColor('#2563eb')
+                   .font('Helvetica-Bold')
+                   .text('OFFICIAL STAMP', 420, stampAreaY + 5, {
+                       width: 110,
+                       align: 'center'
+                   });
+                
+                // Add the actual stamp image - positioned in the center of the box
+                doc.image(stampPath, 435, stampAreaY + 25, {
                     width: 80,
                     height: 80,
                     align: 'center',
                     valign: 'center'
                 });
-                console.log('✅ Stamp image added successfully');
+                
+                console.log('✅ Stamp added at position:', 435, stampAreaY + 25);
+                
             } catch (err) {
-                console.error('Error adding stamp image:', err);
-                // Fallback to text stamp if image fails
-                doc.fontSize(10)
+                console.error('❌ Error adding stamp:', err);
+                // Fallback text stamp
+                doc.rect(400, stampAreaY, 150, 120).stroke('#dc2626');
+                doc.fontSize(14)
                    .fillColor('#dc2626')
                    .font('Helvetica-Bold')
-                   .text('I&L LENDING', 430, stampY + 50)
-                   .text('SERVICES', 435, stampY + 65);
+                   .text('OFFICIAL', 430, stampAreaY + 30)
+                   .text('STAMP', 440, stampAreaY + 50)
+                   .text('(MISSING)', 430, stampAreaY + 70);
             }
         } else {
-            console.log('⚠️ Stamp image not found, using text stamp');
-            // Fallback to text stamp
-            doc.fontSize(10)
+            console.log('❌ Stamp not found at:', stampPath);
+            // Draw placeholder
+            doc.rect(400, stampAreaY, 150, 120).stroke('#dc2626');
+            doc.fontSize(14)
                .fillColor('#dc2626')
                .font('Helvetica-Bold')
-               .text('I&L LENDING', 430, stampY + 50)
-               .text('SERVICES', 435, stampY + 65);
+               .text('STAMP', 440, stampAreaY + 40)
+               .text('NOT', 450, stampAreaY + 60)
+               .text('FOUND', 440, stampAreaY + 80);
         }
-        
-        // Add signature line
-        doc.moveTo(50, stampY + 70)
-           .lineTo(250, stampY + 70)
-           .stroke();
-        
-        doc.fontSize(10)
-           .fillColor('#1e293b')
-           .text('Authorized Signature', 50, stampY + 75)
-           .text('Managing Director', 50, stampY + 85);
-        
-        // Add date stamp
-        doc.fontSize(9)
-           .fillColor('#64748b')
-           .text(`Digitally Generated: ${new Date().toLocaleString()}`, 50, stampY + 50);
         
         // ========== FOOTER ==========
         const pages = doc.bufferedPageRange();
@@ -344,9 +409,10 @@ app.post('/generate-pdf', (req, res) => {
         
         // Finalize PDF
         doc.end();
+        console.log('✅ PDF generated successfully');
         
     } catch (error) {
-        console.error('PDF Generation Error:', error);
+        console.error('❌ PDF Generation Error:', error);
         res.status(500).json({ error: 'Failed to generate PDF: ' + error.message });
     }
 });
@@ -361,6 +427,27 @@ function formatCurrency(amount) {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`I&L PDF Server running on port ${PORT}`);
-    console.log(`Stamp path: ${path.join(__dirname, 'public', 'stamp.png')}`);
+    console.log('=================================');
+    console.log('🚀 I&L PDF Server starting...');
+    console.log('=================================');
+    console.log(`📡 Port: ${PORT}`);
+    console.log(`📁 Directory: ${__dirname}`);
+    console.log(`🔍 Looking for stamp at: ${path.join(__dirname, 'public', 'stamp.png')}`);
+    
+    // Check if stamp exists
+    const stampPath = path.join(__dirname, 'public', 'stamp.png');
+    if (fs.existsSync(stampPath)) {
+        const stats = fs.statSync(stampPath);
+        console.log('✅ STAMP FOUND!');
+        console.log(`📏 Size: ${stats.size} bytes`);
+    } else {
+        console.log('❌ STAMP NOT FOUND!');
+        console.log('📂 Files in directory:', fs.readdirSync(__dirname));
+        if (fs.existsSync(path.join(__dirname, 'public'))) {
+            console.log('📂 Files in public:', fs.readdirSync(path.join(__dirname, 'public')));
+        } else {
+            console.log('📂 Public folder does not exist!');
+        }
+    }
+    console.log('=================================');
 });
