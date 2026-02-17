@@ -1,25 +1,13 @@
 {
+  "name": "illending-pdf-server",
   "version": "1.0.0",
-  "description": "I&L Lending Services PDF Generation Server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "deploy": "nodemon server.js"
+    "start": "node server.js"
   },
-  "keywords": [
-    "pdf",
-    "lending",
-    "generation"
-  ],
-  "author": "Okulo-1996",
-  "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "pdftk": "^0.13.0",
-    "cheerio": "^1.0.0-rev.12"
-  },
-  "engines": {
-    "node": "18.x"
+    "express": "^4.18.2",
+    "pdfkit": "^0.15.0"
   }
 }
